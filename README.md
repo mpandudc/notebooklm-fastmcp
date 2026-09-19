@@ -101,7 +101,7 @@ mcp_servers:
 * `NOTEBOOKLM_STORAGE_PATH`: Path to `storage_state.json` (Default: `~/.notebooklm/profiles/default/storage_state.json`).
 * `NOTEBOOKLM_MASTER_TOKEN_PATH`: Path to `master_token.json` (Default: `~/.notebooklm/profiles/default/master_token.json`).
 * `NOTEBOOKLM_AUTH_ALERT_WEBHOOK`: Webhook URL to alert when session expires (Telegram / Discord webhook).
-* `OBSIDIAN_VAULT_PATH`: Absolute path to your Obsidian vault root (Default: `~/vaults/pandu-second-brain`).
+* `OBSIDIAN_VAULT_PATH`: (Optional) Absolute path to your Obsidian vault root. If unset, `notebook_sync_to_vault` requires explicit `vault_path` parameter.
 * `NOTEBOOKLM_CONFIG_DIR`: Path to custom aliases config (Default: `~/.config/notebooklm-fastmcp`).
 
 ---

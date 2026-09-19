@@ -11,8 +11,8 @@ CONFIG_DIR = Path(os.getenv("NOTEBOOKLM_CONFIG_DIR", Path.home() / ".config" / "
 CONFIG_FILE = CONFIG_DIR / "config.json"
 STORAGE_DIR = Path(os.getenv("NOTEBOOKLM_STORAGE_DIR", Path.home() / ".notebooklm"))
 
-# Default Obsidian Vault path
-DEFAULT_VAULT_PATH = os.getenv("OBSIDIAN_VAULT_PATH", str(Path.home() / "vaults" / "pandu-second-brain"))
+# Optional Obsidian Vault path (None if not configured)
+DEFAULT_VAULT_PATH = os.getenv("OBSIDIAN_VAULT_PATH", None)
 
 def ensure_dirs():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)

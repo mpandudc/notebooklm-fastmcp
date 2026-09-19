@@ -254,16 +254,22 @@ async def notebook_sync_to_vault(
     query_or_topic: str,
     notebook: str,
     note_title: str,
+    vault_path: Optional[str] = None,
     folder: str = "resources/notebooklm",
     tags: str = "notebooklm, research"
 ) -> str:
     """
-    Query NotebookLM and automatically save the grounded research note into Obsidian Vault format with [[wikilinks]].
+    Query NotebookLM and save the grounded research note into Obsidian Vault format with [[wikilinks]].
     notebook: alias name or full Notebook UUID.
     note_title: title for the created markdown file.
-    folder: relative folder inside the Obsidian vault.
+    vault_path: optional absolute path to Obsidian vault. Falls back to OBSIDIAN_VAULT_PATH env.
+    folder: relative folder inside the vault.
     tags: comma-separated tags.
     """
+    target_vault = vault_path or DEFAULT_VAULT_PATH
+    if not target_vault:
+        return "Error: No Obsidian vault configured. Please pass 'vault_path' parameter or set 'OBSIDIAN_VAULT_PATH' environment variable."
+
     notebook_id = _resolve_notebook_id(notebook)
     if not notebook_id:
         return f"Error: Could not resolve notebook '{notebook}'."
@@ -285,7 +291,7 @@ async def notebook_sync_to_vault(
     )
 
     try:
-        saved_file = write_to_vault(DEFAULT_VAULT_PATH, rel_path, md_content)
+        saved_file = write_to_vault(target_vault, rel_path, md_content)
         return f"Successfully synced research note to Obsidian Vault at: `{saved_file}`"
     except Exception as e:
         return f"Error writing note to vault: {e}"
