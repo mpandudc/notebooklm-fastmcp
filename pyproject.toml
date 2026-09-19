@@ -1,0 +1,23 @@
+[project]
+name = "notebooklm-fastmcp"
+version = "0.1.0"
+description = "Lean, high-performance FastMCP server for Google NotebookLM with Obsidian Second Brain sync and custom research aliases"
+readme = "README.md"
+authors = [
+    { name = "Pandu Cahyo", email = "mpandudc@gmail.com" }
+]
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=0.4.0",
+    "httpx>=0.27.0",
+    "notebooklm-py>=0.8.2",
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+notebooklm-fastmcp = "notebooklm_fastmcp.server:main"
+
+[build-system]
+requires = ["uv_build>=0.12.10,<0.13.0"]
+build-backend = "uv_build"
