@@ -1,21 +1,16 @@
 """
 FastMCP Server for Google NotebookLM.
-Exposes a lean, high-signal tool interface:
-1. notebook_ask
-2. notebook_ingest_url
-3. notebook_ingest_file
-4. notebook_sync_to_vault
-5. notebook_alias_manage
-6. notebook_status
+Exposes lean, high-signal tools for AI Agents and Second Brain sync.
 """
 from fastmcp import FastMCP
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 import os
 import sys
+import asyncio
 
 from .config import load_aliases, save_alias, DEFAULT_VAULT_PATH
-from .auth import check_auth_status, STORAGE_PATH
+from .auth import check_auth_status, auto_remint_if_available, send_expiry_alert, STORAGE_PATH
 from .vault_sync import format_obsidian_note, write_to_vault
 
 mcp = FastMCP("notebooklm-fastmcp")
@@ -28,8 +23,22 @@ def _resolve_notebook_id(target: str) -> str:
         return aliases[target_clean]
     return target.strip()
 
+async def _ensure_auth() -> tuple[bool, str]:
+    """Check auth and attempt auto-reminting if expired."""
+    is_valid, msg, details = check_auth_status()
+    if not is_valid:
+        reminted = await auto_remint_if_available()
+        if reminted:
+            is_valid, msg, details = check_auth_status()
+            if is_valid:
+                return True, "Auto-reminted successfully"
+
+        await send_expiry_alert(msg)
+        return False, msg
+    return True, "Authenticated"
+
 @mcp.tool()
-def notebook_status() -> Dict[str, Any]:
+async def notebook_status() -> Dict[str, Any]:
     """
     Check connection health, authentication status, and active aliases of NotebookLM.
     """
@@ -66,6 +75,53 @@ def notebook_alias_manage(action: str, alias: str = "", notebook_id: str = "") -
         return f"Unknown action '{action}'. Allowed actions: 'list', 'set'."
 
 @mcp.tool()
+async def notebook_create(title: str, alias: Optional[str] = None) -> str:
+    """
+    Create a new NotebookLM workspace and optionally assign it a shortcut alias.
+    """
+    ok, msg = await _ensure_auth()
+    if not ok:
+        return f"AUTH_ERROR: {msg}"
+
+    try:
+        from notebooklm.client import NotebookLMClient
+        async with NotebookLMClient.from_storage(path=str(STORAGE_PATH)) as client:
+            nb = await client.notebooks.create(title=title)
+            nb_id = getattr(nb, "id", str(nb))
+            alias_note = ""
+            if alias:
+                save_alias(alias, nb_id)
+                alias_note = f" (Alias registered: `{alias}`)"
+            return f"Successfully created notebook '{title}' [ID: `{nb_id}`]{alias_note}"
+    except Exception as e:
+        return f"Error creating notebook: {e}"
+
+@mcp.tool()
+async def notebook_list_sources(notebook: str) -> str:
+    """
+    List all uploaded sources and documents in a given notebook.
+    notebook: alias name or full Notebook UUID.
+    """
+    notebook_id = _resolve_notebook_id(notebook)
+    if not notebook_id:
+        return f"Error: Could not resolve notebook '{notebook}'."
+
+    ok, msg = await _ensure_auth()
+    if not ok:
+        return f"AUTH_ERROR: {msg}"
+
+    try:
+        from notebooklm.client import NotebookLMClient
+        async with NotebookLMClient.from_storage(path=str(STORAGE_PATH)) as client:
+            sources = await client.sources.list(notebook_id=notebook_id)
+            if not sources:
+                return f"Notebook `{notebook_id}` has no sources yet."
+            lines = [f"- **{getattr(s, 'title', 'Untitled')}** (`{getattr(s, 'id', 'unknown')}`)" for s in sources]
+            return f"### Sources in Notebook (`{notebook}`):\n" + "\n".join(lines)
+    except Exception as e:
+        return f"Error listing sources: {e}"
+
+@mcp.tool()
 async def notebook_ask(
     query: str,
     notebook: str,
@@ -79,9 +135,9 @@ async def notebook_ask(
     if not notebook_id:
         return f"Error: Could not resolve notebook '{notebook}'. Provide an alias or UUID."
 
-    is_valid, msg, _ = check_auth_status()
-    if not is_valid:
-        return f"AUTH_ERROR: {msg}. Please re-import Google cookies."
+    ok, msg = await _ensure_auth()
+    if not ok:
+        return f"AUTH_ERROR: {msg}. Please re-import Google cookies or master token."
 
     try:
         from notebooklm.client import NotebookLMClient
@@ -110,8 +166,8 @@ async def notebook_ingest_url(
     if not notebook_id:
         return f"Error: Could not resolve notebook '{notebook}'."
 
-    is_valid, msg, _ = check_auth_status()
-    if not is_valid:
+    ok, msg = await _ensure_auth()
+    if not ok:
         return f"AUTH_ERROR: {msg}."
 
     try:
@@ -139,8 +195,8 @@ async def notebook_ingest_file(
     if not path.exists():
         return f"Error: File '{file_path}' does not exist."
 
-    is_valid, msg, _ = check_auth_status()
-    if not is_valid:
+    ok, msg = await _ensure_auth()
+    if not ok:
         return f"AUTH_ERROR: {msg}."
 
     try:
@@ -150,6 +206,48 @@ async def notebook_ingest_file(
             return f"Successfully uploaded '{path.name}' to notebook `{notebook_id}`."
     except Exception as e:
         return f"Error uploading file into NotebookLM: {e}"
+
+@mcp.tool()
+async def notebook_generate_podcast(
+    notebook: str,
+    instructions: Optional[str] = None,
+    output_dir: str = "~/Downloads"
+) -> str:
+    """
+    1-Shot Audio Deep Dive (Podcast Duo) generator and downloader.
+    Generates AI conversation podcast from sources and saves the .mp3 file locally.
+    notebook: alias name or full Notebook UUID.
+    instructions: optional customization (e.g. 'Focus on market dynamics and risk').
+    output_dir: directory to save the completed MP3 file.
+    """
+    notebook_id = _resolve_notebook_id(notebook)
+    if not notebook_id:
+        return f"Error: Could not resolve notebook '{notebook}'."
+
+    ok, msg = await _ensure_auth()
+    if not ok:
+        return f"AUTH_ERROR: {msg}."
+
+    try:
+        from notebooklm.client import NotebookLMClient
+        async with NotebookLMClient.from_storage(path=str(STORAGE_PATH)) as client:
+            status = await client.artifacts.generate_audio(
+                notebook_id=notebook_id,
+                instructions=instructions
+            )
+            task_id = getattr(status, "task_id", None)
+            if not task_id:
+                return "Error: Failed to obtain generation task_id."
+
+            out_path = Path(output_dir).expanduser().resolve()
+            out_path.mkdir(parents=True, exist_ok=True)
+            mp3_file = out_path / f"podcast_{notebook_id[:8]}.mp3"
+
+            await client.artifacts.wait_for_completion(notebook_id=notebook_id, task_id=task_id)
+            saved_path = await client.artifacts.download_audio(notebook_id=notebook_id, output_path=str(mp3_file))
+            return f"Podcast generated and downloaded successfully: `{saved_path}`"
+    except Exception as e:
+        return f"Error in podcast generation pipeline: {e}"
 
 @mcp.tool()
 async def notebook_sync_to_vault(
@@ -162,7 +260,7 @@ async def notebook_sync_to_vault(
     """
     Query NotebookLM and automatically save the grounded research note into Obsidian Vault format with [[wikilinks]].
     notebook: alias name or full Notebook UUID.
-    note_title: title for the created markdown file (e.g. 'Regulatory Landscape').
+    note_title: title for the created markdown file.
     folder: relative folder inside the Obsidian vault.
     tags: comma-separated tags.
     """
@@ -170,7 +268,6 @@ async def notebook_sync_to_vault(
     if not notebook_id:
         return f"Error: Could not resolve notebook '{notebook}'."
 
-    # Query topic
     content = await notebook_ask(query=query_or_topic, notebook=notebook)
     if content.startswith("AUTH_ERROR") or content.startswith("Error"):
         return f"Failed to generate content: {content}"
