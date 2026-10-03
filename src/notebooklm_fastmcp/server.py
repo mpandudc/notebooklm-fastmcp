@@ -11,7 +11,7 @@ import asyncio
 
 from .config import load_aliases, save_alias, DEFAULT_VAULT_PATH
 from .auth import check_auth_status, auto_remint_if_available, send_expiry_alert, STORAGE_PATH
-from .vault_sync import format_obsidian_note, write_to_vault
+from .vault_sync import answer_text, format_obsidian_note, format_reference, write_to_vault
 
 mcp = FastMCP("notebooklm-fastmcp")
 
@@ -143,12 +143,12 @@ async def notebook_ask(
         from notebooklm.client import NotebookLMClient
         async with NotebookLMClient.from_storage(path=str(STORAGE_PATH)) as client:
             result = await client.chat.ask(notebook_id=notebook_id, question=query, conversation_id=conversation_id)
-            answer = getattr(result, "text", str(result))
+            answer = answer_text(result)
             references = getattr(result, "references", []) or getattr(result, "citations", [])
             
             cit_str = ""
             if references:
-                cit_str = "\n\n**Citations:**\n" + "\n".join([f"- {r}" for r in references])
+                cit_str = "\n\n**Citations:**\n" + "\n".join(f"- {format_reference(r)}" for r in references)
             return f"{answer}{cit_str}"
     except Exception as e:
         return f"Error querying NotebookLM: {e}"
@@ -301,7 +301,7 @@ def main():
     parser = argparse.ArgumentParser(description="NotebookLM FastMCP Server")
     parser.add_argument("--transport", default="stdio", choices=["stdio", "sse"], help="Transport type (stdio or sse)")
     parser.add_argument("--port", type=int, default=8766, help="Port for SSE transport")
-    parser.add_argument("--host", default="0.0.0.0", help="Host for SSE transport")
+    parser.add_argument("--host", default="127.0.0.1", help="Host for SSE transport (keep loopback: tools write to the vault)")
     args = parser.parse_args()
 
     if args.transport == "sse":
